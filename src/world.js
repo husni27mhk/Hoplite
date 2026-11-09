@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { heightAt, LANDMARKS, WATER_LEVEL } from './terrain.js';
+import { roadDistance } from './roads.js';
+import { fitModel, instanceModel, BROADLEAF, PINES, PALMS, ROCKS, SMALL_PLANTS } from './assets.js';
 
 const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({ color, ...extra });
 
@@ -20,14 +22,11 @@ function rng(seed) {
   };
 }
 
-function house(color, roof) {
-  const g = new THREE.Group();
-  g.add(mesh(new THREE.BoxGeometry(6, 4, 6), lambert(color), 0, 2, 0));
-  const r = mesh(new THREE.ConeGeometry(5.2, 3, 4), lambert(roof), 0, 5.5, 0);
-  r.rotation.y = Math.PI / 4;
-  g.add(r);
-  g.add(mesh(new THREE.BoxGeometry(1.4, 2.4, 0.2), lambert('#6b4226'), 0, 1.2, 3.05));
-  return g;
+let ASSETS = null;
+
+// Kenney City Kit Suburban houses (CC0).
+function house(type, width = 11) {
+  return fitModel(ASSETS.houses[type % ASSETS.houses.length], { width });
 }
 
 function buildVillage(colliders) {
@@ -35,16 +34,16 @@ function buildVillage(colliders) {
   const { x, z } = LANDMARKS.village;
   const y = heightAt(x, z);
   const spots = [
-    [-22, -10, '#f4d35e', '#c0392b'], [-22, 14, '#9ad1d4', '#34495e'],
-    [22, -12, '#f7a072', '#7d3c98'], [24, 16, '#ffffff', '#2e86c1'],
-    [0, -30, '#c5e99b', '#a04000'],
+    [-30, -12, 0], [-30, 16, 1], [30, -14, 2], [32, 16, 3],
+    [-8, -34, 4], [14, -34, 5], [-28, 40, 6],
   ];
-  for (const [dx, dz, c, r] of spots) {
-    const h = house(c, r);
+  for (const [dx, dz, type] of spots) {
+    const h = house(type);
     h.position.set(x + dx, y, z + dz);
+    // Kenney buildings face +Z; turn each front door toward the plaza.
     h.rotation.y = Math.atan2(-dx, -dz);
     g.add(h);
-    colliders.push({ x: x + dx, z: z + dz, r: 4.3 });
+    colliders.push({ x: x + dx, z: z + dz, r: 5.2 });
   }
   // Gas station
   const gas = new THREE.Group();
@@ -65,9 +64,9 @@ function buildLakeDock() {
   const { x, z } = LANDMARKS.lake;
   const bx = x + 55, bz = z - 40;
   const y = heightAt(bx, bz);
-  const hut = house('#d7b98e', '#5d4037');
-  hut.scale.setScalar(0.7);
-  hut.position.set(bx + 4, y, bz + 4);
+  const hut = house(3, 8);
+  hut.position.set(bx + 7, y, bz + 6);
+  hut.rotation.y = -Math.PI * 0.75;
   g.add(hut);
   const dock = mesh(new THREE.BoxGeometry(3, 0.3, 18), lambert('#8d6e63'), bx - 9, WATER_LEVEL + 0.6, bz + 9);
   dock.rotation.y = Math.PI / 4;
@@ -141,73 +140,67 @@ function buildRuins(colliders) {
 
 function scatterNature(colliders, avoid) {
   const rand = rng(1337);
-  const trunks = [], crowns = [], rocks = [], palms = [];
-  const tooClose = (x, z) => avoid.some(a => Math.hypot(x - a.x, z - a.z) < a.r);
-  for (let i = 0; i < 4000 && trunks.length < 650; i++) {
+  const N = ASSETS.nature;
+  const tooClose = (x, z, pad = 0) => avoid.some(a => Math.hypot(x - a.x, z - a.z) < a.r + pad);
+  const offRoad = (x, z, min) => roadDistance(x, z) > min;
+  // model name -> list of world matrices
+  const buckets = new Map();
+  const add = (name, x, y, z, scale, rotY) => {
+    if (!buckets.has(name)) buckets.set(name, []);
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, rotY, 0));
+    buckets.get(name).push(new THREE.Matrix4().compose(new THREE.Vector3(x, y - 0.05, z), q, new THREE.Vector3(scale, scale, scale)));
+  };
+  const pick = (arr) => arr[Math.floor(rand() * arr.length)];
+
+  // Trees: broadleaf in the lowlands, pines higher up.
+  let trees = 0;
+  for (let i = 0; i < 6000 && trees < 700; i++) {
     const x = (rand() - 0.5) * 760, z = (rand() - 0.5) * 760;
     const h = heightAt(x, z);
-    if (h < 2.6 || h > 40 || tooClose(x, z)) continue;
-    const s = 0.8 + rand() * 0.9;
-    trunks.push({ x, z, y: h, s });
-    crowns.push({ x, z, y: h, s, hue: rand() });
-    colliders.push({ x, z, r: 0.7 * s });
+    if (h < 2.8 || h > 42 || tooClose(x, z) || !offRoad(x, z, 7)) continue;
+    const pine = h > 17 + rand() * 6;
+    add(pick(pine ? PINES : BROADLEAF), x, h, z, (pine ? 8 : 6.5) + rand() * 4, rand() * Math.PI * 2);
+    colliders.push({ x, z, r: 0.8 });
+    trees++;
   }
-  for (let i = 0; i < 2000 && palms.length < 70; i++) {
+  // Palms along the beach.
+  let palms = 0;
+  for (let i = 0; i < 4000 && palms < 90; i++) {
     const x = (rand() - 0.5) * 820, z = (rand() - 0.5) * 820;
     const h = heightAt(x, z);
-    if (h < 1 || h > 2.6 || tooClose(x, z)) continue;
-    palms.push({ x, z, y: h, s: 0.8 + rand() * 0.5, r: rand() * Math.PI });
+    if (h < 0.8 || h > 2.8 || tooClose(x, z) || !offRoad(x, z, 6)) continue;
+    add(pick(PALMS), x, h, z, 7 + rand() * 3, rand() * Math.PI * 2);
     colliders.push({ x, z, r: 0.5 });
+    palms++;
   }
-  for (let i = 0; i < 2000 && rocks.length < 180; i++) {
+  // Rocks, bigger on the mountain.
+  let rocks = 0;
+  for (let i = 0; i < 4000 && rocks < 220; i++) {
     const x = (rand() - 0.5) * 760, z = (rand() - 0.5) * 760;
     const h = heightAt(x, z);
-    if (h < 1 || tooClose(x, z)) continue;
-    const s = 0.6 + rand() * 2;
-    rocks.push({ x, z, y: h, s, r: rand() * 6 });
-    if (s > 1.2) colliders.push({ x, z, r: s * 0.9 });
+    if (h < 1 || tooClose(x, z) || !offRoad(x, z, 6)) continue;
+    const size = 1.5 + rand() * (h > 25 ? 5 : 3);
+    add(pick(ROCKS), x, h, z, size, rand() * Math.PI * 2);
+    if (size > 2.5) colliders.push({ x, z, r: size * 0.35 });
+    rocks++;
+  }
+  // Bushes, flowers and mushrooms: decoration only, no collision.
+  let plants = 0;
+  for (let i = 0; i < 12000 && plants < 2600; i++) {
+    const x = (rand() - 0.5) * 760, z = (rand() - 0.5) * 760;
+    const h = heightAt(x, z);
+    if (h < 2.8 || h > 30 || tooClose(x, z, -20) || !offRoad(x, z, 4.5)) continue;
+    const name = pick(SMALL_PLANTS);
+    const bush = name.startsWith('plant');
+    add(name, x, h, z, bush ? 1.2 + rand() * 1.2 : 0.45 + rand() * 0.4, rand() * Math.PI * 2);
+    plants++;
   }
 
   const group = new THREE.Group();
-  const m4 = new THREE.Matrix4();
-  const q = new THREE.Quaternion();
-  const col = new THREE.Color();
-
-  const trunkMesh = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.25, 0.4, 3, 6), lambert('#6d4c41'), trunks.length);
-  const crownGeo = new THREE.ConeGeometry(2.2, 5.5, 7);
-  const crownMesh = new THREE.InstancedMesh(crownGeo, lambert('#ffffff', { flatShading: true }), crowns.length);
-  trunks.forEach((t, i) => {
-    m4.compose(new THREE.Vector3(t.x, t.y + 1.5 * t.s, t.z), q.identity(), new THREE.Vector3(t.s, t.s, t.s));
-    trunkMesh.setMatrixAt(i, m4);
-  });
-  crowns.forEach((c, i) => {
-    m4.compose(new THREE.Vector3(c.x, c.y + 5.2 * c.s, c.z), q.identity(), new THREE.Vector3(c.s, c.s, c.s));
-    crownMesh.setMatrixAt(i, m4);
-    crownMesh.setColorAt(i, col.setHSL(0.27 + c.hue * 0.08, 0.55, 0.28 + c.hue * 0.12));
-  });
-
-  const palmTrunk = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.2, 0.3, 6, 6), lambert('#a1887f'), palms.length);
-  const leafGeo = new THREE.ConeGeometry(3, 1.2, 6);
-  const palmLeaf = new THREE.InstancedMesh(leafGeo, lambert('#43a047', { flatShading: true }), palms.length);
-  palms.forEach((p, i) => {
-    q.setFromEuler(new THREE.Euler(0.15, p.r, 0));
-    m4.compose(new THREE.Vector3(p.x, p.y + 3 * p.s, p.z), q, new THREE.Vector3(p.s, p.s, p.s));
-    palmTrunk.setMatrixAt(i, m4);
-    m4.compose(new THREE.Vector3(p.x, p.y + 6.2 * p.s, p.z + 0.4), q.identity(), new THREE.Vector3(p.s, p.s, p.s));
-    palmLeaf.setMatrixAt(i, m4);
-  });
-
-  const rockMesh = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1), lambert('#8e8e8e', { flatShading: true }), rocks.length);
-  rocks.forEach((r, i) => {
-    q.setFromEuler(new THREE.Euler(r.r, r.r * 2, 0));
-    m4.compose(new THREE.Vector3(r.x, r.y + r.s * 0.3, r.z), q, new THREE.Vector3(r.s, r.s * 0.7, r.s));
-    rockMesh.setMatrixAt(i, m4);
-  });
-
-  for (const m of [trunkMesh, crownMesh, palmTrunk, palmLeaf, rockMesh]) {
-    m.castShadow = true;
-    m.receiveShadow = true;
-    group.add(m);
+  for (const [name, mats] of buckets) {
+    // Fitted to 1 m tall (rocks 1 m wide) so per-instance scale is in metres.
+    const fitted = fitModel(N[name], ROCKS.includes(name) ? { width: 1 } : { height: 1 });
+    group.add(instanceModel(fitted, mats, { castShadow: !SMALL_PLANTS.includes(name) }));
   }
   return group;
 }
@@ -247,7 +240,8 @@ function buildBeacon() {
   return beacon;
 }
 
-export function buildWorld(scene) {
+export function buildWorld(scene, assets) {
+  ASSETS = assets;
   const colliders = [];
   const village = buildVillage(colliders);
   const lighthouse = buildLighthouse(colliders);

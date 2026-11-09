@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { initRoads, applyRoad, roadDistance, ROAD_HALF_WIDTH } from './roads.js';
 
 export const WORLD_SIZE = 900;
 export const WATER_LEVEL = 0;
@@ -9,7 +10,7 @@ function hash(x, z) {
   return s - Math.floor(s);
 }
 
-function noise(x, z) {
+export function noise(x, z) {
   const ix = Math.floor(x), iz = Math.floor(z);
   const fx = x - ix, fz = z - iz;
   const ux = fx * fx * (3 - 2 * fx), uz = fz * fz * (3 - 2 * fz);
@@ -70,7 +71,7 @@ const FLAT_ZONES = [
 ];
 for (const z of FLAT_ZONES) if (z.h === null) z.h = rawHeight(z.x, z.z);
 
-export function heightAt(x, z) {
+function baseHeight(x, z) {
   let h = rawHeight(x, z);
   for (const f of FLAT_ZONES) {
     const d = Math.hypot(x - f.x, z - f.z);
@@ -80,62 +81,143 @@ export function heightAt(x, z) {
   return h;
 }
 
+initRoads(baseHeight, WORLD_SIZE);
+
+export function heightAt(x, z) {
+  return applyRoad(x, z, baseHeight(x, z));
+}
+
+const PLAZA_R = 16;
+
+/** Surface weights: sand, road dirt, rock, snow (grass is whatever remains). */
+export function surfaceAt(x, z, h, slope) {
+  const sand = 1 - smooth(1.4, 2.8, h);
+  const v = LANDMARKS.village;
+  const plaza = 1 - smooth(PLAZA_R - 3, PLAZA_R, Math.hypot(x - v.x, z - v.z));
+  const road = Math.max(plaza, 1 - smooth(ROAD_HALF_WIDTH - 0.8, ROAD_HALF_WIDTH + 1.2, roadDistance(x, z)));
+  const rock = Math.max(smooth(0.5, 0.85, slope), smooth(34, 46, h) * (0.6 + 0.4 * noise(x * 0.1, z * 0.1)));
+  const snow = smooth(49, 55, h + noise(x * 0.2, z * 0.2) * 3);
+  return { sand, road, rock, snow };
+}
+
+// Minimap colours approximating the textured ground.
 const C = {
-  deep: new THREE.Color('#2e5d8a'),
-  sand: new THREE.Color('#e3cf8f'),
-  grass: new THREE.Color('#6fb24a'),
-  grassDark: new THREE.Color('#3f8a3a'),
-  dirt: new THREE.Color('#8b6b45'),
-  rock: new THREE.Color('#8a8580'),
-  snow: new THREE.Color('#f4f7fb'),
+  deep: new THREE.Color('#2b6ca3'),
+  shallow: new THREE.Color('#3a8fd1'),
+  sand: new THREE.Color('#c9b48a'),
+  grass: new THREE.Color('#5e8a2e'),
+  road: new THREE.Color('#a07850'),
+  rock: new THREE.Color('#6d6a66'),
+  snow: new THREE.Color('#eef2f6'),
 };
 
 export function colorAt(x, z, h, out = new THREE.Color()) {
-  if (h < 1.2) return out.copy(h < -2 ? C.deep : C.sand);
-  if (h < 2.5) return out.copy(C.sand).lerp(C.grass, (h - 1.2) / 1.3);
-  if (h > 48) return out.copy(C.rock).lerp(C.snow, Math.min(1, (h - 48) / 6));
-  if (h > 32) return out.copy(C.grassDark).lerp(C.rock, (h - 32) / 16);
-  const n = noise(x * 0.05, z * 0.05);
-  out.copy(C.grass).lerp(C.grassDark, n * 0.8);
-  if (n > 0.82) out.lerp(C.dirt, 0.5);
+  if (h < 0) return out.copy(h < -3 ? C.deep : C.shallow);
+  const slope = Math.hypot(heightAt(x + 1, z) - heightAt(x - 1, z), heightAt(x, z + 1) - heightAt(x, z - 1)) / 2;
+  const s = surfaceAt(x, z, h, slope);
+  out.copy(C.grass).lerp(C.sand, s.sand).lerp(C.rock, s.rock).lerp(C.snow, s.snow).lerp(C.road, s.road);
   return out;
 }
 
-export function createTerrain() {
-  const seg = 240;
+function buildSplatMap(res) {
+  // Height grid with one extra row/column so slopes can be taken from neighbours.
+  const g = res + 1;
+  const hs = new Float32Array(g * g);
+  const step = WORLD_SIZE / res;
+  for (let j = 0; j < g; j++) {
+    for (let i = 0; i < g; i++) {
+      hs[j * g + i] = heightAt(-WORLD_SIZE / 2 + i * step, -WORLD_SIZE / 2 + j * step);
+    }
+  }
+  const data = new Uint8Array(res * res * 4);
+  for (let j = 0; j < res; j++) {
+    for (let i = 0; i < res; i++) {
+      const h00 = hs[j * g + i], h10 = hs[j * g + i + 1], h01 = hs[(j + 1) * g + i], h11 = hs[(j + 1) * g + i + 1];
+      const h = (h00 + h10 + h01 + h11) / 4;
+      const slope = Math.hypot((h10 - h00 + h11 - h01) / 2, (h01 - h00 + h11 - h10) / 2) / step;
+      const x = -WORLD_SIZE / 2 + (i + 0.5) * step, z = -WORLD_SIZE / 2 + (j + 0.5) * step;
+      const s = surfaceAt(x, z, h, slope);
+      const k = (j * res + i) * 4;
+      data[k] = s.sand * 255;
+      data[k + 1] = s.road * 255;
+      data[k + 2] = s.rock * 255;
+      data[k + 3] = s.snow * 255;
+    }
+  }
+  const tex = new THREE.DataTexture(data, res, res, THREE.RGBAFormat);
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+export function createTerrain(textures) {
+  const seg = 360;
   const geo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, seg, seg);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position;
+  const gridN = seg + 1;
+  const heights = new Float32Array(pos.count);
+  const meadow = new Float32Array(pos.count);
   for (let i = 0; i < pos.count; i++) {
-    pos.setY(i, heightAt(pos.getX(i), pos.getZ(i)));
+    const x = pos.getX(i), z = pos.getZ(i);
+    const h = heightAt(x, z);
+    pos.setY(i, h);
+    heights[i] = h;
+    meadow[i] = smooth(0.45, 0.75, noise(x * 0.025 + 7, z * 0.025 - 3));
   }
-  // Non-indexed so flat shading gets a single colour per face (low-poly look).
-  const flat = geo.toNonIndexed();
-  const p = flat.attributes.position;
-  const colors = new Float32Array(p.count * 3);
-  const col = new THREE.Color();
-  for (let i = 0; i < p.count; i += 3) {
-    const cx = (p.getX(i) + p.getX(i + 1) + p.getX(i + 2)) / 3;
-    const cy = (p.getY(i) + p.getY(i + 1) + p.getY(i + 2)) / 3;
-    const cz = (p.getZ(i) + p.getZ(i + 1) + p.getZ(i + 2)) / 3;
-    colorAt(cx, cz, cy, col);
-    for (let k = 0; k < 3; k++) col.toArray(colors, (i + k) * 3);
-  }
-  flat.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  flat.computeVertexNormals();
-  const mesh = new THREE.Mesh(
-    flat,
-    new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })
-  );
+  geo.setAttribute('aMeadow', new THREE.BufferAttribute(meadow, 1));
+  geo.computeVertexNormals();
+
+  const heightTex = new THREE.DataTexture(heights, gridN, gridN, THREE.RedFormat, THREE.FloatType);
+  heightTex.needsUpdate = true;
+  const splatTex = buildSplatMap(512);
+
+  const mat = new THREE.MeshLambertMaterial({ color: '#ffffff' });
+  mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, {
+      tGrass: { value: textures.grass },
+      tMeadow: { value: textures.meadow },
+      tDirt: { value: textures.dirt },
+      tSand: { value: textures.sand },
+      tRock: { value: textures.rock },
+      tSnow: { value: textures.snow },
+      tSplat: { value: splatTex },
+      uWorld: { value: WORLD_SIZE },
+    });
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aMeadow;\nvarying float vMeadow;\nvarying vec3 vWPos;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvMeadow = aMeadow;\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+uniform sampler2D tGrass, tMeadow, tDirt, tSand, tRock, tSnow, tSplat;
+uniform float uWorld;
+varying float vMeadow;
+varying vec3 vWPos;
+// Two scales per texture hide tiling repetition.
+vec3 tex2(sampler2D t, vec2 p, float s) {
+  return mix(texture2D(t, p * s).rgb, texture2D(t, p * s * 0.27 + 0.13).rgb, 0.4);
+}`)
+      .replace('#include <map_fragment>', `
+vec4 sp = texture2D(tSplat, vWPos.xz / uWorld + 0.5);
+vec2 p = vWPos.xz;
+vec3 grass = mix(tex2(tGrass, p, 0.16), tex2(tMeadow, p, 0.11), vMeadow * 0.7) * 1.15;
+vec3 col = grass;
+col = mix(col, tex2(tSand, p, 0.12), sp.r);
+col = mix(col, tex2(tRock, p, 0.08), sp.b);
+col = mix(col, tex2(tSnow, p, 0.1) * 1.1, sp.a);
+col = mix(col, tex2(tDirt, p, 0.2), sp.g);
+diffuseColor.rgb *= col;`);
+  };
+  const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
 
   const water = new THREE.Mesh(
     new THREE.PlaneGeometry(4000, 4000),
-    new THREE.MeshPhongMaterial({
-      color: '#3a8fd1', transparent: true, opacity: 0.82, shininess: 90,
-    })
+    new THREE.MeshPhongMaterial({ color: '#2f88c9', transparent: true, opacity: 0.8, shininess: 90 })
   );
   water.rotation.x = -Math.PI / 2;
   water.position.y = WATER_LEVEL;
-  return { mesh, water };
+
+  return { mesh, water, heightTex, splatTex, gridN };
 }

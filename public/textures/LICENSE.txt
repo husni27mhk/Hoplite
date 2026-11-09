@@ -1,0 +1,8 @@
+Ground textures from ambientCG (https://ambientcg.com), licensed CC0 1.0 Universal.
+grass.jpg  = Grass004
+meadow.jpg = Ground037
+dirt.jpg   = Ground079S
+sand.jpg   = Ground054
+rock.jpg   = Rock030
+snow.jpg   = Snow006
+Downscaled to 512x512.

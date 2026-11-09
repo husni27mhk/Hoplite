@@ -1,130 +1,94 @@
 import * as THREE from 'three';
 import { heightAt, WATER_LEVEL } from './terrain.js';
 
-const box = (w, h, d, color, opts = {}) => {
-  const m = new THREE.Mesh(
-    new THREE.BoxGeometry(w, h, d),
-    new THREE.MeshLambertMaterial({ color, ...opts })
-  );
-  m.castShadow = true;
-  return m;
-};
 
-function buildVanModel() {
+const VAN_LENGTH = 4.6;
+
+// Kenney Car Kit van (CC0). Wheels are separate nodes, so they can spin and steer.
+function buildVanModel(source) {
   const root = new THREE.Group();
+  const model = source.clone();
+  const box0 = new THREE.Box3().setFromObject(model);
+  const s = VAN_LENGTH / box0.getSize(new THREE.Vector3()).z;
+  model.scale.setScalar(s);
+  model.position.y = -box0.min.y * s;
+
   const body = new THREE.Group();
-  body.position.y = 0.55;
   root.add(body);
-
-  // Classic two-tone camper van: orange bottom, cream top.
-  const lower = box(2.2, 1.0, 4.6, '#e8702a');
-  lower.position.y = 0.6;
-  const upper = box(2.2, 1.1, 4.4, '#f6ecd4');
-  upper.position.set(0, 1.65, -0.05);
-  const nose = box(2.2, 0.9, 0.3, '#f6ecd4');
-  nose.position.set(0, 0.75, 2.4);
-  const bumperF = box(2.3, 0.25, 0.25, '#555');
-  bumperF.position.set(0, 0.2, 2.45);
-  const bumperB = bumperF.clone();
-  bumperB.position.z = -2.4;
-  body.add(lower, upper, nose, bumperF, bumperB);
-
-  const glass = { color: '#7fc6e8', transparent: true, opacity: 0.85 };
-  const windshield = box(2.0, 0.75, 0.08, glass.color, glass);
-  windshield.position.set(0, 1.7, 2.17);
-  windshield.rotation.x = -0.12;
-  body.add(windshield);
-  for (const side of [-1, 1]) {
-    for (const z of [1.3, 0, -1.3]) {
-      const w = box(0.06, 0.6, 1.0, glass.color, glass);
-      w.position.set(side * 1.11, 1.75, z);
-      body.add(w);
-    }
+  const wheels = [];
+  const wheelNodes = [];
+  model.traverse((o) => { if (o.name.startsWith('wheel-')) wheelNodes.push(o); });
+  for (const w of wheelNodes) {
+    // pivot (steer) -> spinner (roll) -> original wheel mesh
+    const pivot = new THREE.Group();
+    pivot.position.copy(w.position);
+    const spinner = new THREE.Group();
+    w.parent.add(pivot);
+    pivot.add(spinner);
+    w.position.set(0, 0, 0);
+    spinner.add(w);
+    wheels.push({ pivot, wheel: spinner, front: w.name.includes('front') });
+  }
+  const bodyNode = model.getObjectByName('body');
+  root.add(model);
+  // Lean/bounce only the body; wheels stay planted.
+  if (bodyNode) {
+    body.position.copy(bodyNode.position).multiplyScalar(s);
+    body.position.y += model.position.y;
+    model.remove(bodyNode);
+    bodyNode.position.set(0, 0, 0);
+    bodyNode.scale.multiplyScalar(s);
+    body.add(bodyNode);
   }
 
-  // V-shaped front logo panel
-  const logo = new THREE.Mesh(
-    new THREE.CircleGeometry(0.28, 20),
-    new THREE.MeshLambertMaterial({ color: '#ffffff' })
-  );
-  logo.position.set(0, 0.95, 2.56);
-  body.add(logo);
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(root);
+  const top = box.max.y, front = box.max.z, back = box.min.z;
+  const halfW = (box.max.x - box.min.x) / 2;
 
-  // Headlights
-  const lightMat = new THREE.MeshBasicMaterial({ color: '#fff6c8' });
-  for (const side of [-0.75, 0.75]) {
-    const hl = new THREE.Mesh(new THREE.CircleGeometry(0.2, 16), lightMat);
-    hl.position.set(side, 0.75, 2.56);
-    body.add(hl);
-  }
-  const tailMat = new THREE.MeshBasicMaterial({ color: '#c0182a' });
-  for (const side of [-0.85, 0.85]) {
-    const tl = new THREE.Mesh(new THREE.PlaneGeometry(0.25, 0.4), tailMat);
-    tl.position.set(side, 0.8, -2.32);
-    tl.rotation.y = Math.PI;
-    body.add(tl);
-  }
-
-  // Roof rack with surfboard and luggage
-  const rack = box(1.9, 0.08, 3.2, '#333');
-  rack.position.set(0, 2.3, -0.2);
+  // Roof rack with surfboard and luggage: it's an adventure van.
+  const roof = new THREE.Group();
+  roof.position.y = top - body.position.y;
+  const rack = box3(halfW * 1.4, 0.08, VAN_LENGTH * 0.6, '#333');
+  rack.position.set(0, 0.05, -0.2);
   const board = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.3, 2.8, 4, 10),
-    new THREE.MeshLambertMaterial({ color: '#2ab3a6' })
+    new THREE.CapsuleGeometry(0.28, 2.6, 4, 10),
+    new THREE.MeshLambertMaterial({ color: '#ff9f1c' })
   );
   board.rotation.x = Math.PI / 2;
   board.scale.set(1, 1, 0.25);
-  board.position.set(-0.45, 2.42, -0.2);
+  board.position.set(-halfW * 0.38, 0.16, -0.2);
   board.castShadow = true;
-  const bag = box(0.7, 0.45, 0.9, '#a0522d');
-  bag.position.set(0.5, 2.55, 0.3);
-  body.add(rack, board, bag);
+  const bag = box3(0.6, 0.4, 0.8, '#8d5a2b');
+  bag.position.set(halfW * 0.4, 0.28, 0.2);
+  roof.add(rack, board, bag);
+  body.add(roof);
 
-  // Spare wheel on the back
-  const spare = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.45, 0.45, 0.25, 16),
-    new THREE.MeshLambertMaterial({ color: '#222' })
-  );
-  spare.rotation.x = Math.PI / 2;
-  spare.position.set(0, 1.5, -2.45);
-  body.add(spare);
-
-  // Wheels
-  const wheels = [];
-  const wheelGeo = new THREE.CylinderGeometry(0.48, 0.48, 0.35, 18);
-  wheelGeo.rotateZ(Math.PI / 2);
-  const tire = new THREE.MeshLambertMaterial({ color: '#1d1d1d' });
-  const hub = new THREE.MeshLambertMaterial({ color: '#dddddd' });
-  for (const [x, z, front] of [[-1.05, 1.5, true], [1.05, 1.5, true], [-1.05, -1.5, false], [1.05, -1.5, false]]) {
-    const pivot = new THREE.Group();
-    pivot.position.set(x, 0.48, z);
-    const wheel = new THREE.Mesh(wheelGeo, tire);
-    wheel.castShadow = true;
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.37, 12).rotateZ(Math.PI / 2), hub);
-    wheel.add(cap);
-    pivot.add(wheel);
-    root.add(pivot);
-    wheels.push({ pivot, wheel, front });
-  }
-
-  // Headlight beams
   const headlights = [];
-  for (const side of [-0.75, 0.75]) {
+  for (const side of [-halfW * 0.6, halfW * 0.6]) {
     const spot = new THREE.SpotLight('#fff3c4', 0, 60, 0.5, 0.5, 1.2);
-    spot.position.set(side, 1.3, 2.6);
+    spot.position.set(side, 0.9, front);
     const target = new THREE.Object3D();
-    target.position.set(side, 0, 14);
+    target.position.set(side, 0, front + 14);
     root.add(spot, target);
     spot.target = target;
     headlights.push(spot);
   }
 
-  return { root, body, wheels, headlights };
+  return { root, body, wheels, headlights, wheelRadius: 0.3 * s, bodyY: body.position.y, length: front - back };
+}
+
+function box3(w, h, d, color) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color }));
+  m.castShadow = true;
+  return m;
 }
 
 export class Van {
-  constructor(scene) {
-    const m = buildVanModel();
+  constructor(scene, model) {
+    const m = buildVanModel(model);
+    this.wheelRadius = m.wheelRadius;
+    this.bodyY = m.bodyY;
     this.mesh = m.root;
     this.body = m.body;
     this.wheels = m.wheels;
@@ -154,10 +118,11 @@ export class Van {
     return out.set(Math.sin(this.heading), 0, Math.cos(this.heading));
   }
 
-  update(dt, input, colliders, hasFuel) {
+  // onRoad: 0..1, driving off-road on grass lowers top speed a little.
+  update(dt, input, colliders, hasFuel, onRoad = 1) {
     const throttle = hasFuel ? input.throttle : Math.min(0, input.throttle) * 0.3;
     const boost = input.boost && hasFuel && throttle > 0 ? 1.45 : 1;
-    const top = this.maxSpeed * boost;
+    const top = this.maxSpeed * boost * (0.82 + 0.18 * onRoad);
 
     if (this.grounded) {
       if (throttle > 0) {
@@ -260,14 +225,14 @@ export class Van {
   }
 
   updateVisuals(dt) {
-    this.wheelSpin += (this.speed / 0.48) * dt;
+    this.wheelSpin += (this.speed / this.wheelRadius) * dt;
     for (const w of this.wheels) {
       w.wheel.rotation.x = this.wheelSpin;
       if (w.front) w.pivot.rotation.y = this.steer;
     }
     // Body lean and a bit of bounce for character.
     this.body.rotation.z += (-this.steer * Math.min(1, Math.abs(this.speed) / 25) * 0.12 - this.body.rotation.z) * Math.min(1, 6 * dt);
-    this.body.position.y = 0.55 + Math.sin(performance.now() * 0.02) * 0.015 * Math.min(1, Math.abs(this.speed) / 10);
+    this.body.position.y = this.bodyY + Math.sin(performance.now() * 0.02) * 0.015 * Math.min(1, Math.abs(this.speed) / 10);
   }
 
   setHeadlights(intensity) {

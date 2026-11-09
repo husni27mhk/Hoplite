@@ -3,13 +3,16 @@ import { createTerrain, heightAt, colorAt, LANDMARKS, WORLD_SIZE } from './terra
 import { Van } from './van.js';
 import { buildWorld } from './world.js';
 import { GameAudio } from './audio.js';
+import { loadAssets } from './assets.js';
+import { createGrass } from './grass.js';
+import { roadWeight } from './roads.js';
 
 // ---------- Renderer & scene ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 document.getElementById('app').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -36,10 +39,18 @@ starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3));
 const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: '#fff', size: 2, sizeAttenuation: false, transparent: true, fog: false }));
 scene.add(stars);
 
-const { mesh: terrain, water } = createTerrain();
+const playBtn = document.getElementById('play');
+const assets = await loadAssets((p) => { playBtn.textContent = `Memuat aset... ${Math.round(p * 100)}%`; });
+const { mesh: terrain, water, heightTex, splatTex, gridN } = createTerrain(assets.textures);
 scene.add(terrain, water);
-const world = buildWorld(scene);
-const van = new Van(scene);
+const world = buildWorld(scene, assets);
+const van = new Van(scene, assets.van);
+const isTouch = matchMedia('(pointer: coarse)').matches;
+const grass = createGrass({ heightTex, splatTex, gridN, worldSize: WORLD_SIZE, count: isTouch ? 25000 : 60000 });
+scene.add(grass.mesh);
+const grassLight = new THREE.Color(1, 1, 1);
+playBtn.textContent = 'Mulai Petualangan';
+playBtn.disabled = false;
 const audio = new GameAudio();
 
 // ---------- Missions ----------
@@ -82,6 +93,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyC') state.camMode = (state.camMode + 1) % 3;
   if (e.code === 'KeyR') resetVan();
   if (e.code === 'KeyM') toast(audio.toggleMute() ? '🔇 Suara mati' : '🔊 Suara nyala');
+  if (e.code === 'KeyG') toast((grass.mesh.visible = !grass.mesh.visible) ? '🌿 Rumput nyala' : '🌿 Rumput mati (lebih ringan)');
 });
 window.addEventListener('keyup', (e) => KEYMAP[e.code] && keys.delete(KEYMAP[e.code]));
 window.addEventListener('blur', () => keys.clear());
@@ -278,6 +290,7 @@ function updateDayNight(dt) {
   sun.target.position.copy(van.pos);
   sun.intensity = 2.2 * dayK;
   hemi.intensity = 0.25 + 0.7 * dayK;
+  grassLight.setScalar(0.18 + 0.95 * dayK).lerp(sun.color, 0.15 * dayK);
 
   const night = new THREE.Color('#0b1430');
   const dusk = new THREE.Color('#ff9a62');
@@ -329,7 +342,7 @@ let lastBump = 0;
 function step(dt) {
   const input = readInput();
   const hasFuel = state.fuel > 0;
-  van.update(dt, input, world.colliders, hasFuel);
+  van.update(dt, input, world.colliders, hasFuel, roadWeight(van.pos.x, van.pos.z));
   if (van.bumped > 0.35 && state.time - lastBump > 0.5) { audio.bump(); lastBump = state.time; }
 
   // Fuel consumption
@@ -354,22 +367,27 @@ function step(dt) {
   audio.setEngine(Math.min(1, Math.abs(van.speed) / 45), Math.abs(input.throttle), hasFuel);
 }
 
-const clock = new THREE.Clock();
+const clock = new THREE.Timer();
+const grassCenter = new THREE.Vector3();
 function loop() {
   requestAnimationFrame(loop);
+  clock.update();
   const dt = Math.min(clock.getDelta(), 1 / 30);
   if (state.running && !state.paused) {
     state.time += dt;
     step(dt);
   }
-  world.animate(clock.elapsedTime);
+  world.animate(clock.getElapsed());
+  // Centre the grass field ahead of the van so more of it is in view.
+  grassCenter.copy(van.pos).addScaledVector(van.forward(), 18);
+  grass.update(clock.getElapsed(), grassCenter, van.pos, grassLight);
   updateDayNight(state.running && !state.paused ? dt : 0);
   updateCamera(dt);
   if (state.running) {
     updateHud();
     drawMinimap();
   }
-  water.position.y = Math.sin(clock.elapsedTime * 0.8) * 0.08;
+  water.position.y = Math.sin(clock.getElapsed() * 0.8) * 0.08;
   if (toastTimer > 0) {
     toastTimer -= dt;
     if (toastTimer <= 0) $('toast').classList.remove('show');
@@ -411,4 +429,4 @@ camLook.copy(van.pos);
 loop();
 
 // Exposed for automated checks in the browser console.
-window.__game = { state, van, world };
+window.__game = { state, van, world, roadWeight, grass, renderer, scene, terrain, camera };

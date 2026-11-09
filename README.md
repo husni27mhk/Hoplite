@@ -23,15 +23,24 @@ pnpm build    # hasil statis di dist/
 | C | Ganti kamera (dekat / jauh / kabin) |
 | R | Kembalikan van jika terjebak |
 | M | Suara on/off |
+| G | Rumput 3D on/off (untuk perangkat lemah) |
 
 Di HP/tablet tersedia tombol sentuh di layar.
 
 ## Fitur
 
-- Pulau low-poly prosedural: danau, gunung bersalju, pantai, hutan.
+- Pulau prosedural bertekstur: rumput, padang, pasir pantai, tebing batu, dan salju dicampur otomatis lewat shader sesuai ketinggian & kemiringan.
+- Ribuan helai rumput 3D yang bergoyang tertiup angin dan tersibak saat dilewati van.
+- Jalan tanah dari desa ke setiap lokasi misi (lebih cepat di jalan, sedikit melambat di rumput).
+- Model van, rumah, pohon, batu, semak & bunga dari Kenney.
 - Misi berurutan: Danau Biru → Mercusuar Tua → Puncak Elang → Reruntuhan Kuno → pulang ke Desa.
 - Kompas, minimap, dan pilar cahaya penunjuk tujuan.
 - Sistem bensin: jeriken merah (+35) dan SPBU di desa; kehabisan bensin = panggil derek.
 - Siklus siang–malam dengan lampu depan van, bintang, dan mercusuar berputar.
 - Fisika arkade: tanjakan, lompatan dari bukit, tabrakan pohon/batu.
 - Efek suara sintetis (mesin, klakson, koin) tanpa file aset.
+
+## Kredit aset (semua CC0)
+
+- [Kenney](https://kenney.nl): Car Kit (van), City Kit Suburban (rumah), Nature Kit (pohon, palem, batu, semak, bunga). Lisensi di `public/models/LICENSE-kenney-*.txt`.
+- [ambientCG](https://ambientcg.com): tekstur tanah Grass004, Ground037, Ground079S, Ground054, Rock030, Snow006. Lihat `public/textures/LICENSE.txt`.
