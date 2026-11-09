@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <title>Van Petualang 3D</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚐</text></svg>" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <div id="hud" class="hidden">
+      <div id="mission" class="panel">
+        <div class="label">MISI <span id="mission-step"></span></div>
+        <div id="mission-text"></div>
+        <div id="mission-dist"></div>
+      </div>
+      <div id="stats" class="panel">
+        <div>🪙 <span id="coins">0</span></div>
+        <div>⭐ <span id="score">0</span></div>
+        <div>⏱️ <span id="timer">0:00</span></div>
+        <div id="clock">☀️ 08:00</div>
+      </div>
+      <canvas id="minimap" width="180" height="180"></canvas>
+      <div id="compass"><div id="arrow">▲</div></div>
+      <div id="dash" class="panel">
+        <div id="speed"><span id="speed-val">0</span><small> km/j</small></div>
+        <div class="fuel-row">⛽ <div id="fuel-bar"><div id="fuel-fill"></div></div></div>
+      </div>
+      <div id="toast"></div>
+      <div id="help">WASD/Panah: setir · Spasi: rem tangan · Shift: turbo · H: klakson · C: kamera · R: reset · M: suara</div>
+      <div id="touch">
+        <div class="tgroup">
+          <button data-key="left">◀</button>
+          <button data-key="right">▶</button>
+        </div>
+        <div class="tgroup">
+          <button data-key="boost">🚀</button>
+          <button data-key="brake">⏬</button>
+          <button data-key="gas">⏫</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="start" class="overlay">
+      <div class="card">
+        <h1>🚐 Van Petualang 3D</h1>
+        <p>Kemudikan van klasikmu keliling Pulau Pelangi! Kunjungi semua tempat legendaris, kumpulkan koin emas, dan jangan sampai kehabisan bensin.</p>
+        <ul>
+          <li><b>W / ↑</b> gas · <b>S / ↓</b> rem & mundur · <b>A D / ← →</b> belok</li>
+          <li><b>Shift</b> turbo · <b>Spasi</b> rem tangan · <b>H</b> klakson</li>
+          <li><b>C</b> ganti kamera · <b>R</b> kembalikan van · <b>M</b> suara</li>
+          <li>⛽ Ambil jeriken merah atau isi bensin di SPBU desa</li>
+        </ul>
+        <button id="play">Mulai Petualangan</button>
+      </div>
+    </div>
+
+    <div id="stranded" class="overlay hidden">
+      <div class="card">
+        <h2>⛽ Kehabisan Bensin!</h2>
+        <p>Vanmu mogok di tengah jalan. Panggil mobil derek ke desa? (−200 poin)</p>
+        <button id="tow">Panggil Derek</button>
+      </div>
+    </div>
+
+    <div id="win" class="overlay hidden">
+      <div class="card">
+        <h2>🏆 Petualangan Selesai!</h2>
+        <p id="win-text"></p>
+        <button id="free-roam">Jelajah Bebas</button>
+        <button id="restart">Main Lagi</button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
